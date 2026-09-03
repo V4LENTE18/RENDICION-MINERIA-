@@ -4,7 +4,7 @@ import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 import os
 import io
-from datetime import date
+from datetime import date, datetime
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -27,37 +27,38 @@ CATEGORIAS = [
     "PAGOS TRANQUERA"
 ]
 
+NOMBRE_PESTAÑA = "Hoja 1"  # Cambia esto si tu pestaña en Google Sheets tiene otro nombre
+
 # ==========================================
 # CONEXIÓN EN TIEMPO REAL CON GOOGLE SHEETS
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ⚠️ Pon aquí el nombre exacto de la pestaña de tu Google Sheets
-NOMBRE_PESTAÑA = "Hoja 1"
-
 def cargar_datos():
     try:
-        df = conn.read(ttl=0)
+        df = conn.read(worksheet=NOMBRE_PESTAÑA, ttl=0)
         if df.empty or "ID" not in df.columns:
             return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
         
-        # Convertir a numéricos
-        df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce').fillna(0)
-        df['Precio Unitario'] = pd.to_numeric(df['Precio Unitario'], errors='coerce').fillna(0)
-        df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
+        # Convertir columnas a tipos numéricos
+        df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce').fillna(0.0)
+        df['Precio Unitario'] = pd.to_numeric(df['Precio Unitario'], errors='coerce').fillna(0.0)
+        df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0.0)
         
-        # Convertir a fechas, ORDENAR (más reciente a más antigua) y devolver a texto seguro
+        # Convertir a objetos de Fecha reales para compatibilidad con DateColumn
         df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
         df = df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
-        df['Fecha'] = df['Fecha'].dt.strftime('%Y-%m-%d')
+        df['Fecha'] = df['Fecha'].dt.date.fillna(date.today())
         
         return df
     except Exception:
         return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
 
 def guardar_datos(df):
-    # Asegúrate de que "Hoja 1" sea el nombre exacto de tu pestaña en Google Sheets
-    conn.update(worksheet="Hoja 1", data=df)
+    df_a_guardar = df.copy()
+    # Convertir las fechas a texto YYYY-MM-DD para guardarlas limpias en Google Sheets
+    df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
+    conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
 
 # ==========================================
 # GENERACIÓN DE EXCEL OFICIAL 365
@@ -147,7 +148,7 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
                 
                 fila_datos = fila_tabla + 1
                 for _, row_data in df_cat.iterrows():
-                    worksheet_cat.write(fila_datos, 0, row_data['Fecha'])
+                    worksheet_cat.write(fila_datos, 0, str(row_data['Fecha']))
                     worksheet_cat.write(fila_datos, 1, row_data['Categoría'])
                     worksheet_cat.write(fila_datos, 2, row_data['N° Serie'])
                     worksheet_cat.write(fila_datos, 3, row_data['Descripción'])
@@ -185,7 +186,7 @@ with st.sidebar:
     
     with st.form("registro_form", clear_on_submit=True):
         st.subheader("Nuevo Comprobante")
-        fecha = st.date_input("Fecha", date.today())
+        fecha_ingreso = st.date_input("Fecha", date.today())
         categoria = st.selectbox("Categoría / Rubro", CATEGORIAS)
         serie = st.text_input("N° Documento / Serie", placeholder="Ej: F001-00123")
         descripcion = st.text_input("Descripción del Producto*", placeholder="Ej: Sacos de Arroz")
@@ -210,7 +211,7 @@ with st.sidebar:
                 
                 nuevo_registro = pd.DataFrame([{
                     "ID": nuevo_id,
-                    "Fecha": fecha.strftime('%Y-%m-%d'),
+                    "Fecha": fecha_ingreso,
                     "Categoría": categoria,
                     "N° Serie": serie if serie else "-",
                     "Descripción": descripcion.upper(),
@@ -222,10 +223,9 @@ with st.sidebar:
                 
                 df_gastos = pd.concat([df_gastos, nuevo_registro], ignore_index=True)
                 
-                # Re-ordenar automáticamente al agregar un dato nuevo
-                df_gastos['Fecha'] = pd.to_datetime(df_gastos['Fecha'], errors='coerce')
+                # Re-ordenar por fecha
+                df_gastos['Fecha'] = pd.to_datetime(df_gastos['Fecha'], errors='coerce').dt.date
                 df_gastos = df_gastos.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
-                df_gastos['Fecha'] = df_gastos['Fecha'].dt.strftime('%Y-%m-%d')
                 
                 guardar_datos(df_gastos)
                 st.success("✅ Registro guardado en la Nube y ordenado exitosamente!")
@@ -306,10 +306,9 @@ if not df_gastos.empty:
     )
 
     if not df_gastos.equals(edited_df):
-        # Si editan la tabla, aseguramos que se vuelva a ordenar por fecha antes de guardar
-        edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce')
+        # Ordenar por fecha antes de guardar en la nube
+        edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
         edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
-        edited_df['Fecha'] = edited_df['Fecha'].dt.strftime('%Y-%m-%d')
         
         guardar_datos(edited_df)
         st.success("✅ Cambios sincronizados con la nube!")
