@@ -4,7 +4,7 @@ import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 import os
 import io
-from datetime import date, datetime
+from datetime import date
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -45,7 +45,7 @@ def cargar_datos():
         df['Precio Unitario'] = pd.to_numeric(df['Precio Unitario'], errors='coerce').fillna(0.0)
         df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0.0)
         
-        # Convertir a objetos de Fecha reales para compatibilidad con DateColumn
+        # Convertir a objetos de Fecha reales
         df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
         df = df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
         df['Fecha'] = df['Fecha'].dt.date.fillna(date.today())
@@ -56,12 +56,11 @@ def cargar_datos():
 
 def guardar_datos(df):
     df_a_guardar = df.copy()
-    # Convertir las fechas a texto YYYY-MM-DD para guardarlas limpias en Google Sheets
     df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
     conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
 
 # ==========================================
-# GENERACIÓN DE EXCEL OFICIAL 365
+# GENERACIÓN DE EXCEL OFICIAL CON GRÁFICOS AVANZADOS
 # ==========================================
 def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
     output = io.BytesIO()
@@ -94,13 +93,16 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
                 worksheet.insert_image('A1', logo_path, opciones_logo)
                 worksheet.insert_image('H1', logo_path, opciones_logo)
 
+        # 1. HOJA DASHBOARD CON MÚLTIPLES GRÁFICOS
         worksheet_dash = workbook.add_worksheet('DASHBOARD')
         dibujar_encabezado_oficial(worksheet_dash)
-        worksheet_dash.set_column('A:A', 40)
+        worksheet_dash.set_column('A:A', 35)
         worksheet_dash.set_column('B:B', 20)
         
         if not df.empty:
             resumen = df.groupby("Categoría")["Total"].sum().reset_index()
+            resumen = resumen.sort_values(by="Total", ascending=False)
+            
             fila_inicio = 11
             worksheet_dash.write(fila_inicio, 0, 'CATEGORÍA / RUBRO', formato_encabezado_tabla)
             worksheet_dash.write(fila_inicio, 1, 'MONTO TOTAL', formato_encabezado_tabla)
@@ -114,17 +116,32 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
             worksheet_dash.write(fila_actual, 0, 'TOTAL GENERAL', formato_encabezado_tabla)
             worksheet_dash.write(fila_actual, 1, df['Total'].sum(), formato_total)
             
-            chart = workbook.add_chart({'type': 'doughnut'})
-            chart.add_series({
-                'name': 'Distribución',
+            # Gráfico 1: Dona (Distribución Porcentual)
+            chart_doughnut = workbook.add_chart({'type': 'doughnut'})
+            chart_doughnut.add_series({
+                'name': 'Distribución Porcentual',
                 'categories': ['DASHBOARD', fila_inicio+1, 0, fila_actual-1, 0],
                 'values':     ['DASHBOARD', fila_inicio+1, 1, fila_actual-1, 1],
                 'data_labels': {'percentage': True, 'leader_lines': True}
             })
-            chart.set_title({'name': 'Distribución de Gastos'})
-            chart.set_size({'width': 550, 'height': 350})
-            worksheet_dash.insert_chart('D12', chart)
+            chart_doughnut.set_title({'name': 'Distribución Porcentual de Gastos'})
+            chart_doughnut.set_size({'width': 480, 'height': 320})
+            worksheet_dash.insert_chart('D11', chart_doughnut)
 
+            # Gráfico 2: Barras Horizontales (Ranking de Gastos)
+            chart_bar = workbook.add_chart({'type': 'bar'})
+            chart_bar.add_series({
+                'name': 'Monto Total S/',
+                'categories': ['DASHBOARD', fila_inicio+1, 0, fila_actual-1, 0],
+                'values':     ['DASHBOARD', fila_inicio+1, 1, fila_actual-1, 1],
+                'fill':       {'color': '#1E3A8A'}
+            })
+            chart_bar.set_title({'name': 'Ranking de Egresos por Rubro'})
+            chart_bar.set_size({'width': 480, 'height': 320})
+            chart_bar.set_legend({'position': 'none'})
+            worksheet_dash.insert_chart('D28', chart_bar)
+
+        # 2. HOJAS SEPARADAS POR CATEGORÍA
         if not df.empty:
             categorias_unicas = df['Categoría'].unique()
             for cat in categorias_unicas:
@@ -251,7 +268,7 @@ kpi4.metric("🔥 Mayor Rubro de Gasto", categoria_mayor)
 
 st.markdown("---")
 
-# Gráficos Interactivos
+# Gráficos Interactivos en la Web
 if not df_gastos.empty and total_gastado > 0:
     resumen_cat = df_gastos.groupby("Categoría")["Total"].sum().reset_index()
     resumen_cat_ordenado = resumen_cat.sort_values(by="Total", ascending=False)
