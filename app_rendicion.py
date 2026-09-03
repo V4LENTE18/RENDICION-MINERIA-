@@ -56,7 +56,8 @@ def cargar_datos():
         return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
 
 def guardar_datos(df):
-    conn.update(data=df)
+    # Asegúrate de que "Hoja 1" sea el nombre exacto de tu pestaña en Google Sheets
+    conn.update(worksheet="Hoja 1", data=df)
 
 # ==========================================
 # GENERACIÓN DE EXCEL OFICIAL 365
