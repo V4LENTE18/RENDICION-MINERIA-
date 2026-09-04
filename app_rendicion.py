@@ -93,7 +93,6 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
                 worksheet.insert_image('A1', logo_path, opciones_logo)
                 worksheet.insert_image('H1', logo_path, opciones_logo)
 
-        # 1. HOJA DASHBOARD CON MÚLTIPLES GRÁFICOS
         worksheet_dash = workbook.add_worksheet('DASHBOARD')
         dibujar_encabezado_oficial(worksheet_dash)
         worksheet_dash.set_column('A:A', 35)
@@ -116,7 +115,6 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
             worksheet_dash.write(fila_actual, 0, 'TOTAL GENERAL', formato_encabezado_tabla)
             worksheet_dash.write(fila_actual, 1, df['Total'].sum(), formato_total)
             
-            # Gráfico 1: Dona (Distribución Porcentual)
             chart_doughnut = workbook.add_chart({'type': 'doughnut'})
             chart_doughnut.add_series({
                 'name': 'Distribución Porcentual',
@@ -128,7 +126,6 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
             chart_doughnut.set_size({'width': 480, 'height': 320})
             worksheet_dash.insert_chart('D11', chart_doughnut)
 
-            # Gráfico 2: Barras Horizontales (Ranking de Gastos)
             chart_bar = workbook.add_chart({'type': 'bar'})
             chart_bar.add_series({
                 'name': 'Monto Total S/',
@@ -141,7 +138,6 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
             chart_bar.set_legend({'position': 'none'})
             worksheet_dash.insert_chart('D28', chart_bar)
 
-        # 2. HOJAS SEPARADAS POR CATEGORÍA
         if not df.empty:
             categorias_unicas = df['Categoría'].unique()
             for cat in categorias_unicas:
@@ -240,7 +236,6 @@ with st.sidebar:
                 
                 df_gastos = pd.concat([df_gastos, nuevo_registro], ignore_index=True)
                 
-                # Re-ordenar por fecha
                 df_gastos['Fecha'] = pd.to_datetime(df_gastos['Fecha'], errors='coerce').dt.date
                 df_gastos = df_gastos.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
                 
@@ -301,10 +296,55 @@ else:
 st.markdown("---")
 
 # ==========================================
-# SECCIÓN DE EDICIÓN Y ELIMINACIÓN
+# NUEVO: CARPETAS DE GASTOS POR CATEGORÍA
 # ==========================================
-st.subheader("🗄️ Base de Datos Interactiva (Ordenada por Fecha)")
-st.info("💡 Haz doble clic en cualquier celda para corregirla. Para eliminar, selecciona la fila a la izquierda y presiona el ícono de papelera.")
+st.subheader("🗂️ Carpetas de Gastos por Categoría")
+st.markdown("Explora el detalle de cada rubro haciendo clic en las carpetas para expandirlas.")
+
+if not df_gastos.empty:
+    # Agrupamos y ordenamos las categorías por el total gastado (de mayor a menor)
+    categorias_ordenadas = df_gastos.groupby("Categoría")["Total"].sum().sort_values(ascending=False).index
+
+    for cat in categorias_ordenadas:
+        df_cat = df_gastos[df_gastos["Categoría"] == cat]
+        total_cat = df_cat["Total"].sum()
+        num_items = len(df_cat)
+        
+        # Título de la carpeta interactiva
+        titulo_carpeta = f"📂 {cat}   |   💰 Total Acumulado: S/ {total_cat:,.2f}"
+        
+        with st.expander(titulo_carpeta):
+            # Mini-dashboard dentro de la carpeta
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Cant. de Compras", num_items)
+            gasto_prom = total_cat / num_items if num_items > 0 else 0
+            c2.metric("Gasto Promedio", f"S/ {gasto_prom:,.2f}")
+            c3.metric("Gasto Máximo", f"S/ {df_cat['Total'].max():,.2f}")
+            
+            st.markdown(f"**Detalle de operaciones para: {cat}**")
+            
+            # Tabla estilizada solo con los datos de esta categoría
+            # Ocultamos la columna Categoría e ID porque ya estamos dentro de su carpeta
+            df_mostrar = df_cat.drop(columns=["ID", "Categoría"])
+            
+            st.dataframe(
+                df_mostrar,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                    "Precio Unitario": st.column_config.NumberColumn("P. Unit", format="S/ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total", format="S/ %.2f")
+                }
+            )
+
+st.markdown("---")
+
+# ==========================================
+# SECCIÓN DE EDICIÓN GLOBAL
+# ==========================================
+st.subheader("🗄️ Editor Global de la Base de Datos")
+st.info("💡 Desde aquí puedes corregir o eliminar cualquier registro de manera general.")
 
 if not df_gastos.empty:
     edited_df = st.data_editor(
@@ -323,7 +363,6 @@ if not df_gastos.empty:
     )
 
     if not df_gastos.equals(edited_df):
-        # Ordenar por fecha antes de guardar en la nube
         edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
         edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
         
