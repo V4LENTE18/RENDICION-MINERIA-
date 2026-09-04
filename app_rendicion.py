@@ -55,9 +55,13 @@ def cargar_datos():
         return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
 
 def guardar_datos(df):
-    df_a_guardar = df.copy()
-    df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
-    conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
+    try:
+        df_a_guardar = df.copy()
+        df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
+        conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
+        return True
+    except Exception as e:
+        return False
 
 # ==========================================
 # GENERACIÓN DE EXCEL OFICIAL CON GRÁFICOS AVANZADOS
@@ -239,9 +243,12 @@ with st.sidebar:
                 df_gastos['Fecha'] = pd.to_datetime(df_gastos['Fecha'], errors='coerce').dt.date
                 df_gastos = df_gastos.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
                 
-                guardar_datos(df_gastos)
-                st.success("✅ Registro guardado en la Nube y ordenado exitosamente!")
-                st.rerun()
+                exito = guardar_datos(df_gastos)
+                if exito:
+                    st.success("✅ Registro guardado en la Nube y ordenado exitosamente!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Error de conexión con Google Sheets. Espera un momento antes de volver a intentarlo.")
             else:
                 st.error("⚠️ Ingrese una descripción y un Monto Total válido.")
 
@@ -366,9 +373,12 @@ if not df_gastos.empty:
         edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
         edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
         
-        guardar_datos(edited_df)
-        st.success("✅ Cambios sincronizados con la nube!")
-        st.rerun()
+        exito = guardar_datos(edited_df)
+        if exito:
+            st.success("✅ Cambios sincronizados con la nube!")
+            st.rerun()
+        else:
+            st.error("⚠️ Error de conexión con Google Sheets. Espera unos minutos y vuelve a intentarlo. Tus cambios aún no se han guardado.")
 
     st.markdown("---")
     excel_data = generar_excel_dinamico(df_gastos, input_periodo, input_pres, input_tes, input_fisc)
