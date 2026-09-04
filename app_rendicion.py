@@ -37,21 +37,34 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def cargar_datos():
     try:
         df = conn.read(worksheet=NOMBRE_PESTAÑA, ttl=0)
-        if df.empty or "ID" not in df.columns:
-            return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
         
-        # Convertir columnas a tipos numéricos
+        columnas_requeridas = ["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"]
+        
+        if df is None or df.empty:
+            return pd.DataFrame(columns=columnas_requeridas)
+        
+        # Asegurar que todas las columnas existan
+        for col in columnas_requeridas:
+            if col not in df.columns:
+                df[col] = "-" if col in ["N° Serie", "Unidad", "Descripción", "Categoría"] else 0
+
+        # Conversión segura de datos numéricos
+        df['ID'] = pd.to_numeric(df['ID'], errors='coerce').fillna(0).astype(int)
         df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce').fillna(0.0)
         df['Precio Unitario'] = pd.to_numeric(df['Precio Unitario'], errors='coerce').fillna(0.0)
         df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0.0)
         
-        # Convertir a objetos de Fecha reales
+        # Conversión de Fechas
         df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
         df = df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
         df['Fecha'] = df['Fecha'].dt.date.fillna(date.today())
         
-        return df
-    except Exception:
+        # Eliminar filas totalmente vacías
+        df = df[df['Descripción'].astype(str).str.strip() != ""]
+        
+        return df[columnas_requeridas]
+    except Exception as e:
+        st.error(f"⚠️ Error al leer Google Sheets: {e}")
         return pd.DataFrame(columns=["ID", "Fecha", "Categoría", "N° Serie", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"])
 
 def guardar_datos(df):
@@ -59,8 +72,10 @@ def guardar_datos(df):
         df_a_guardar = df.copy()
         df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
         conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
+        st.cache_data.clear()  # <-- Limpia la memoria de Streamlit para obligar a refrescar
         return True
     except Exception as e:
+        st.error(f"⚠️ Error al guardar en Google Sheets: {e}")
         return False
 
 # ==========================================
@@ -191,6 +206,7 @@ with st.sidebar:
     st.title("Registro de Egresos")
     
     if st.button("🔄 Actualizar Datos de la Nube", use_container_width=True):
+        st.cache_data.clear()
         st.rerun()
     
     with st.expander("📝 CONFIGURACIÓN DEL REPORTE", expanded=True):
@@ -224,7 +240,8 @@ with st.sidebar:
         
         if submit_button:
             if descripcion and monto_total > 0:
-                nuevo_id = int(df_gastos["ID"].max() + 1) if not df_gastos.empty and pd.notnull(df_gastos["ID"].max()) else 1
+                ids_existentes = pd.to_numeric(df_gastos["ID"], errors='coerce').dropna()
+                nuevo_id = int(ids_existentes.max() + 1) if not ids_existentes.empty else 1
                 
                 nuevo_registro = pd.DataFrame([{
                     "ID": nuevo_id,
@@ -245,10 +262,10 @@ with st.sidebar:
                 
                 exito = guardar_datos(df_gastos)
                 if exito:
-                    st.success("✅ Registro guardado en la Nube y ordenado exitosamente!")
+                    st.success("✅ Registro guardado en la Nube exitosamente!")
                     st.rerun()
                 else:
-                    st.error("⚠️ Error de conexión con Google Sheets. Espera un momento antes de volver a intentarlo.")
+                    st.error("⚠️ Error de conexión con Google Sheets. Inténtalo de nuevo.")
             else:
                 st.error("⚠️ Ingrese una descripción y un Monto Total válido.")
 
@@ -303,13 +320,12 @@ else:
 st.markdown("---")
 
 # ==========================================
-# NUEVO: CARPETAS DE GASTOS POR CATEGORÍA
+# CARPETAS DE GASTOS POR CATEGORÍA
 # ==========================================
 st.subheader("🗂️ Carpetas de Gastos por Categoría")
 st.markdown("Explora el detalle de cada rubro haciendo clic en las carpetas para expandirlas.")
 
 if not df_gastos.empty:
-    # Agrupamos y ordenamos las categorías por el total gastado (de mayor a menor)
     categorias_ordenadas = df_gastos.groupby("Categoría")["Total"].sum().sort_values(ascending=False).index
 
     for cat in categorias_ordenadas:
@@ -317,11 +333,9 @@ if not df_gastos.empty:
         total_cat = df_cat["Total"].sum()
         num_items = len(df_cat)
         
-        # Título de la carpeta interactiva
         titulo_carpeta = f"📂 {cat}   |   💰 Total Acumulado: S/ {total_cat:,.2f}"
         
         with st.expander(titulo_carpeta):
-            # Mini-dashboard dentro de la carpeta
             c1, c2, c3 = st.columns(3)
             c1.metric("Cant. de Compras", num_items)
             gasto_prom = total_cat / num_items if num_items > 0 else 0
@@ -330,8 +344,6 @@ if not df_gastos.empty:
             
             st.markdown(f"**Detalle de operaciones para: {cat}**")
             
-            # Tabla estilizada solo con los datos de esta categoría
-            # Ocultamos la columna Categoría e ID porque ya estamos dentro de su carpeta
             df_mostrar = df_cat.drop(columns=["ID", "Categoría"])
             
             st.dataframe(
@@ -351,7 +363,7 @@ st.markdown("---")
 # SECCIÓN DE EDICIÓN GLOBAL
 # ==========================================
 st.subheader("🗄️ Editor Global de la Base de Datos")
-st.info("💡 Desde aquí puedes corregir o eliminar cualquier registro de manera general.")
+st.info("💡 Haz tus correcciones o elimina filas en la tabla y presiona el botón **'💾 Guardar Cambios en la Nube'** para sincronizar.")
 
 if not df_gastos.empty:
     edited_df = st.data_editor(
@@ -361,7 +373,7 @@ if not df_gastos.empty:
         hide_index=False,
         key="editor_datos_nube",
         column_config={
-            "ID": None,
+            "ID": st.column_config.NumberColumn("ID", disabled=True),
             "Fecha": st.column_config.DateColumn("Fecha", format="YYYY-MM-DD", required=True),
             "Categoría": st.column_config.SelectboxColumn("Categoría", options=CATEGORIAS, required=True),
             "Precio Unitario": st.column_config.NumberColumn("P. Unitario", format="S/ %.2f"),
@@ -369,16 +381,16 @@ if not df_gastos.empty:
         }
     )
 
-    if not df_gastos.equals(edited_df):
+    if st.button("💾 Guardar Cambios en la Nube", type="primary"):
         edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
         edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
         
         exito = guardar_datos(edited_df)
         if exito:
-            st.success("✅ Cambios sincronizados con la nube!")
+            st.success("✅ Cambios sincronizados con Google Sheets exitosamente!")
             st.rerun()
         else:
-            st.error("⚠️ Error de conexión con Google Sheets. Espera unos minutos y vuelve a intentarlo. Tus cambios aún no se han guardado.")
+            st.error("⚠️ Error al guardar los cambios. Revisa tu conexión.")
 
     st.markdown("---")
     excel_data = generar_excel_dinamico(df_gastos, input_periodo, input_pres, input_tes, input_fisc)
