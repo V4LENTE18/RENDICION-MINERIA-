@@ -16,11 +16,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed" # Inicia cerrado en móviles para dar más espacio
 )
 
-# Estilo CSS adicional para mejorar el aspecto en móviles
+# Estilo CSS suave (Eliminado el fondo de los metric que causaba problemas en modo oscuro)
 st.markdown("""
     <style>
     .stButton>button { border-radius: 8px; font-weight: bold; }
-    .stMetric { background-color: #f8f9fa; padding: 10px; border-radius: 10px; border: 1px solid #e9ecef; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -76,11 +75,11 @@ def guardar_datos(df):
     try:
         df_a_guardar = df.copy()
         
-        # LIMPIEZA PROFUNDA (Clave para evitar bloqueos con >1000 filas en Google Sheets)
+        # LIMPIEZA PROFUNDA
         df_a_guardar['Fecha'] = pd.to_datetime(df_a_guardar['Fecha'], errors='coerce').dt.strftime('%Y-%m-%d')
         df_a_guardar['Fecha'] = df_a_guardar['Fecha'].fillna(date.today().strftime('%Y-%m-%d'))
         
-        # Convertir tipos nativos de Python para evitar errores de serialización JSON de Pandas
+        # Convertir tipos nativos
         df_a_guardar['ID'] = df_a_guardar['ID'].astype(int)
         df_a_guardar['Descripción'] = df_a_guardar['Descripción'].astype(str)
         df_a_guardar['Categoría'] = df_a_guardar['Categoría'].astype(str)
@@ -91,7 +90,7 @@ def guardar_datos(df):
         df_a_guardar['Precio Unitario'] = df_a_guardar['Precio Unitario'].astype(float)
         df_a_guardar['Total'] = df_a_guardar['Total'].astype(float)
         
-        df_a_guardar = df_a_guardar.fillna("") # Eliminar cualquier Null fantasma
+        df_a_guardar = df_a_guardar.fillna("")
         
         conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
         st.cache_data.clear()
@@ -218,7 +217,7 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
 # ==========================================
 df_gastos = cargar_datos()
 
-# --- BARRA LATERAL (Simplificada para no estorbar en móviles) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2933/2933923.png", width=60)
     st.title("Menú Principal")
@@ -234,7 +233,7 @@ with st.sidebar:
         input_fisc = st.text_input("Fiscal", "HITLER ESPINOZA LOPEZ")
 
 # ==========================================
-# PESTAÑAS PRINCIPALES (Adaptables a móviles)
+# PESTAÑAS PRINCIPALES
 # ==========================================
 tab_dashboard, tab_registro, tab_base_datos = st.tabs([
     "📊 Resumen", 
@@ -243,16 +242,16 @@ tab_dashboard, tab_registro, tab_base_datos = st.tabs([
 ])
 
 # ---------------------------------------------------------
-# PESTAÑA 1: DASHBOARD
+# PESTAÑA 1: DASHBOARD (Restauradas las Carpetas y KPIs corregidos)
 # ---------------------------------------------------------
 with tab_dashboard:
     st.header("📊 Panel de Control")
     
-    # KPIs Responsivos (En móvil se apilarán automáticamente)
+    # KPIs nativos (Sin fallos de color en modo oscuro)
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    total_gastado = df_gastos["Total"].sum() if not df_gastos.empty else 0.0
+    total_gastado = float(df_gastos["Total"].sum()) if not df_gastos.empty else 0.0
     total_registros = len(df_gastos)
-    promedio_gasto = df_gastos["Total"].mean() if total_registros > 0 else 0.0
+    promedio_gasto = float(df_gastos["Total"].mean()) if total_registros > 0 else 0.0
     categoria_mayor = df_gastos.groupby("Categoría")["Total"].sum().idxmax() if not df_gastos.empty and total_gastado > 0 else "N/A"
 
     kpi1.metric("💰 Gasto Total", f"S/ {total_gastado:,.2f}")
@@ -263,7 +262,7 @@ with tab_dashboard:
 
     if not df_gastos.empty and total_gastado > 0:
         resumen_cat = df_gastos.groupby("Categoría")["Total"].sum().reset_index().sort_values(by="Total", ascending=False)
-        col_barras, col_pastel = st.columns([1.5, 1]) # Proporción ajustada
+        col_barras, col_pastel = st.columns([1.5, 1]) 
         
         with col_barras:
             fig_bar = px.bar(resumen_cat, x="Total", y="Categoría", orientation='h', text="Total", color="Categoría", color_discrete_sequence=px.colors.qualitative.Bold)
@@ -276,12 +275,48 @@ with tab_dashboard:
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             fig_pie.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0), height=350)
             st.plotly_chart(fig_pie, use_container_width=True)
+            
+        st.markdown("---")
+        
+        # RESTAURACIÓN DE LAS CARPETAS (Con información interna)
+        st.subheader("🗂️ Carpetas de Gastos por Categoría")
+        st.markdown("Explora el detalle de cada rubro haciendo clic en las carpetas para expandirlas.")
+        
+        categorias_ordenadas = df_gastos.groupby("Categoría")["Total"].sum().sort_values(ascending=False).index
+
+        for cat in categorias_ordenadas:
+            df_cat = df_gastos[df_gastos["Categoría"] == cat]
+            total_cat = df_cat["Total"].sum()
+            num_items = len(df_cat)
+            
+            titulo_carpeta = f"📂 {cat}   |   💰 Total Acumulado: S/ {total_cat:,.2f}"
+            
+            with st.expander(titulo_carpeta):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Cant. de Compras", num_items)
+                gasto_prom = total_cat / num_items if num_items > 0 else 0
+                c2.metric("Gasto Promedio", f"S/ {gasto_prom:,.2f}")
+                c3.metric("Gasto Máximo", f"S/ {df_cat['Total'].max():,.2f}")
+                
+                st.markdown(f"**Detalle de operaciones para: {cat}**")
+                df_mostrar = df_cat.drop(columns=["ID", "Categoría"])
+                
+                st.dataframe(
+                    df_mostrar,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                        "Precio Unitario": st.column_config.NumberColumn("P. Unit", format="S/ %.2f"),
+                        "Total": st.column_config.NumberColumn("Total", format="S/ %.2f")
+                    }
+                )
     else:
         st.info("Sin datos suficientes para gráficos.")
 
 
 # ---------------------------------------------------------
-# PESTAÑA 2: NUEVO REGISTRO MÚLTIPLE (Optimizado Móvil/PC)
+# PESTAÑA 2: NUEVO REGISTRO MÚLTIPLE
 # ---------------------------------------------------------
 with tab_registro:
     st.header("📝 Ingreso Rápido de Comprobante")
@@ -294,23 +329,20 @@ with tab_registro:
     
     st.markdown("---")
     
-    # Formulario rediseñado en bloques de 2 (Perfecto para móvil)
     with st.form("form_item", clear_on_submit=True):
         st.subheader("🛒 Datos del Producto")
         categoria = st.selectbox("Categoría / Rubro", CATEGORIAS)
         descripcion = st.text_input("Descripción del Producto*", placeholder="Ej: Sacos de Arroz")
         
-        # Bloque 1
         colA, colB = st.columns(2)
         cantidad = colA.number_input("Cantidad", min_value=0.01, step=1.0, value=1.0)
         unidad = colB.text_input("Unidad", "UND")
         
-        # Bloque 2
         colC, colD = st.columns(2)
         precio_unitario = colC.number_input("P. Unitario", min_value=0.0, step=1.0, value=0.0)
         monto_total = colD.number_input("Total (Dejar 0 para Autocalcular)", min_value=0.0, step=1.0, value=0.0)
         
-        st.write("") # Espaciador
+        st.write("") 
         btn_agregar = st.form_submit_button("➕ Añadir a la Lista Temporal", type="secondary", use_container_width=True)
         
         if btn_agregar:
@@ -328,7 +360,6 @@ with tab_registro:
             else:
                 st.error("⚠️ Falta la descripción.")
     
-    # MOSTRAR CARRITO
     if len(st.session_state.lista_productos) > 0:
         st.markdown("### 📋 Resumen de la Boleta")
         df_lista = pd.DataFrame(st.session_state.lista_productos)
@@ -346,7 +377,6 @@ with tab_registro:
         suma_comprobante = df_lista["Total"].sum()
         st.info(f"**💰 Total del Comprobante: S/ {suma_comprobante:,.2f}**")
         
-        # Botones de Acción
         col_guardar, col_limpiar = st.columns([2, 1])
         
         if col_guardar.button("💾 GUARDAR BOLETA EN LA NUBE", type="primary", use_container_width=True):
@@ -387,18 +417,16 @@ with tab_registro:
 
 
 # ---------------------------------------------------------
-# PESTAÑA 3: EDITOR Y DESCARGAS (Anti-Lag)
+# PESTAÑA 3: EDITOR Y DESCARGAS
 # ---------------------------------------------------------
 with tab_base_datos:
     st.header("🗄️ Base de Datos")
     
     if not df_gastos.empty:
-        # 1. Buscador Rápido (No congela la app)
         st.subheader("🔍 Buscador Rápido")
         busqueda = st.text_input("🔎 Escribe para buscar (Descripción, Categoría, Fecha...)", placeholder="Ej: Arroz, Combustible, 2025...")
         
         if busqueda:
-            # Filtrar dataframe como texto
             df_vista = df_gastos[df_gastos.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
         else:
             df_vista = df_gastos
@@ -415,7 +443,6 @@ with tab_base_datos:
             }
         )
         
-        # 2. Modo Edición Oculto (Para evitar Lag en celulares con +1000 items)
         with st.expander("✏️ Habilitar Edición Global (Precaución)"):
             st.warning("⚠️ Edita directamente las celdas de la tabla inferior y presiona Guardar.")
             edited_df = st.data_editor(
@@ -446,7 +473,6 @@ with tab_base_datos:
                     st.rerun()
 
         st.markdown("---")
-        # 3. Descarga de Excel
         st.subheader("📥 Exportar")
         excel_data = generar_excel_dinamico(df_gastos, input_periodo, input_pres, input_tes, input_fisc)
         
