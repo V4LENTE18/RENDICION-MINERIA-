@@ -7,14 +7,22 @@ import io
 from datetime import date
 
 # ==========================================
-# CONFIGURACIÓN DE LA PÁGINA
+# CONFIGURACIÓN DE LA PÁGINA (DISEÑO RESPONSIVO)
 # ==========================================
 st.set_page_config(
-    page_title="Rendición de Cuentas - Minera",
+    page_title="Rendición Minera",
     page_icon="⛏️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed" # Inicia cerrado en móviles para dar más espacio
 )
+
+# Estilo CSS adicional para mejorar el aspecto en móviles
+st.markdown("""
+    <style>
+    .stButton>button { border-radius: 8px; font-weight: bold; }
+    .stMetric { background-color: #f8f9fa; padding: 10px; border-radius: 10px; border: 1px solid #e9ecef; }
+    </style>
+""", unsafe_allow_html=True)
 
 CATEGORIAS = [
     "ABARROTES E IMPLEMENTOS DE COCINA",
@@ -29,14 +37,11 @@ CATEGORIAS = [
 
 NOMBRE_PESTAÑA = "Hoja 1"
 
-# ==========================================
-# INICIALIZAR MEMORIA TEMPORAL (CARRITO)
-# ==========================================
 if "lista_productos" not in st.session_state:
     st.session_state.lista_productos = []
 
 # ==========================================
-# CONEXIÓN Y FUNCIONES DE BASE DE DATOS
+# CONEXIÓN Y FUNCIONES DE BASE DE DATOS (MÁS DE 1000 ITEMS)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -52,6 +57,7 @@ def cargar_datos():
             if col not in df.columns:
                 df[col] = "-" if col in ["N° Serie", "Unidad", "Descripción", "Categoría"] else 0
 
+        # Forzar conversión limpia
         df['ID'] = pd.to_numeric(df['ID'], errors='coerce').fillna(0).astype(int)
         df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce').fillna(0.0)
         df['Precio Unitario'] = pd.to_numeric(df['Precio Unitario'], errors='coerce').fillna(0.0)
@@ -69,11 +75,29 @@ def cargar_datos():
 def guardar_datos(df):
     try:
         df_a_guardar = df.copy()
-        df_a_guardar['Fecha'] = df_a_guardar['Fecha'].astype(str)
+        
+        # LIMPIEZA PROFUNDA (Clave para evitar bloqueos con >1000 filas en Google Sheets)
+        df_a_guardar['Fecha'] = pd.to_datetime(df_a_guardar['Fecha'], errors='coerce').dt.strftime('%Y-%m-%d')
+        df_a_guardar['Fecha'] = df_a_guardar['Fecha'].fillna(date.today().strftime('%Y-%m-%d'))
+        
+        # Convertir tipos nativos de Python para evitar errores de serialización JSON de Pandas
+        df_a_guardar['ID'] = df_a_guardar['ID'].astype(int)
+        df_a_guardar['Descripción'] = df_a_guardar['Descripción'].astype(str)
+        df_a_guardar['Categoría'] = df_a_guardar['Categoría'].astype(str)
+        df_a_guardar['N° Serie'] = df_a_guardar['N° Serie'].astype(str)
+        df_a_guardar['Unidad'] = df_a_guardar['Unidad'].astype(str)
+        
+        df_a_guardar['Cantidad'] = df_a_guardar['Cantidad'].astype(float)
+        df_a_guardar['Precio Unitario'] = df_a_guardar['Precio Unitario'].astype(float)
+        df_a_guardar['Total'] = df_a_guardar['Total'].astype(float)
+        
+        df_a_guardar = df_a_guardar.fillna("") # Eliminar cualquier Null fantasma
+        
         conn.update(worksheet=NOMBRE_PESTAÑA, data=df_a_guardar)
         st.cache_data.clear()
         return True
     except Exception as e:
+        st.error(f"Error técnico al guardar: {e}")
         return False
 
 # ==========================================
@@ -194,112 +218,104 @@ def generar_excel_dinamico(df, periodo, presidente, tesorero, fiscal):
 # ==========================================
 df_gastos = cargar_datos()
 
-# --- BARRA LATERAL (Simplificada) ---
+# --- BARRA LATERAL (Simplificada para no estorbar en móviles) ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2933/2933923.png", width=80)
-    st.title("Opciones Generales")
+    st.image("https://cdn-icons-png.flaticon.com/512/2933/2933923.png", width=60)
+    st.title("Menú Principal")
     
-    if st.button("🔄 Refrescar Datos Nube", use_container_width=True):
+    if st.button("🔄 Sincronizar / Refrescar", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     
-    with st.expander("📝 CONFIGURACIÓN DEL REPORTE", expanded=True):
-        input_periodo = st.text_input("Período a Rendir", "JUNIO - 2025")
+    with st.expander("📝 Datos del Reporte Excel", expanded=False):
+        input_periodo = st.text_input("Mes/Año", "JUNIO - 2025")
         input_pres = st.text_input("Presidente", "RUDISON CARRASCO SALAZAR")
         input_tes = st.text_input("Tesorero", "CLEVER ALATA VELASQUEZ")
         input_fisc = st.text_input("Fiscal", "HITLER ESPINOZA LOPEZ")
-        
-    st.info("💡 Navega por las pestañas de la derecha para usar la aplicación.")
 
 # ==========================================
-# PESTAÑAS PRINCIPALES (TABS)
+# PESTAÑAS PRINCIPALES (Adaptables a móviles)
 # ==========================================
 tab_dashboard, tab_registro, tab_base_datos = st.tabs([
-    "📊 Panel Dashboard", 
-    "📝 Registrar Comprobante (Múltiple)", 
-    "🗄️ Base de Datos y Reportes"
+    "📊 Resumen", 
+    "🛒 Registrar Boleta", 
+    "🗄️ Base de Datos"
 ])
 
 # ---------------------------------------------------------
 # PESTAÑA 1: DASHBOARD
 # ---------------------------------------------------------
 with tab_dashboard:
-    st.title("📊 Panel de Control - Sociedad Minera Rey")
+    st.header("📊 Panel de Control")
     
+    # KPIs Responsivos (En móvil se apilarán automáticamente)
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     total_gastado = df_gastos["Total"].sum() if not df_gastos.empty else 0.0
     total_registros = len(df_gastos)
     promedio_gasto = df_gastos["Total"].mean() if total_registros > 0 else 0.0
     categoria_mayor = df_gastos.groupby("Categoría")["Total"].sum().idxmax() if not df_gastos.empty and total_gastado > 0 else "N/A"
 
-    kpi1.metric("💰 Egreso Total General", f"S/ {total_gastado:,.2f}")
-    kpi2.metric("🧾 Total de Operaciones", total_registros)
-    kpi3.metric("📈 Promedio por Compra", f"S/ {promedio_gasto:,.2f}")
-    kpi4.metric("🔥 Mayor Rubro de Gasto", categoria_mayor)
+    kpi1.metric("💰 Gasto Total", f"S/ {total_gastado:,.2f}")
+    kpi2.metric("🧾 Operaciones", total_registros)
+    kpi3.metric("📈 Promedio", f"S/ {promedio_gasto:,.2f}")
+    kpi4.metric("🔥 Mayor Rubro", categoria_mayor)
     st.markdown("---")
 
     if not df_gastos.empty and total_gastado > 0:
         resumen_cat = df_gastos.groupby("Categoría")["Total"].sum().reset_index().sort_values(by="Total", ascending=False)
-        col_barras, col_pastel = st.columns([1.2, 1])
+        col_barras, col_pastel = st.columns([1.5, 1]) # Proporción ajustada
         
         with col_barras:
-            st.subheader("Ranking de Gastos por Categoría")
             fig_bar = px.bar(resumen_cat, x="Total", y="Categoría", orientation='h', text="Total", color="Categoría", color_discrete_sequence=px.colors.qualitative.Bold)
             fig_bar.update_traces(texttemplate='S/ %{text:,.2f}', textposition='outside')
-            fig_bar.update_layout(showlegend=False, xaxis_title="Monto (S/)", yaxis_title="", margin=dict(l=0, r=0, t=30, b=0))
+            fig_bar.update_layout(showlegend=False, xaxis_title="Monto (S/)", yaxis_title="", margin=dict(l=0, r=0, t=30, b=0), height=350)
             st.plotly_chart(fig_bar, use_container_width=True)
 
         with col_pastel:
-            st.subheader("Distribución Porcentual")
             fig_pie = px.pie(resumen_cat, values='Total', names='Categoría', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pie.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0))
+            fig_pie.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0), height=350)
             st.plotly_chart(fig_pie, use_container_width=True)
-            
-        st.markdown("---")
-        st.subheader("🗂️ Carpetas de Gastos por Categoría")
-        for cat in resumen_cat["Categoría"]:
-            df_cat = df_gastos[df_gastos["Categoría"] == cat]
-            total_cat = df_cat["Total"].sum()
-            with st.expander(f"📂 {cat}   |   💰 Total Acumulado: S/ {total_cat:,.2f}"):
-                df_mostrar = df_cat.drop(columns=["ID", "Categoría"])
-                st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info("Agrega datos en la pestaña 'Registrar Comprobante' para ver los gráficos.")
+        st.info("Sin datos suficientes para gráficos.")
 
 
 # ---------------------------------------------------------
-# PESTAÑA 2: NUEVO REGISTRO MÚLTIPLE (MEJORA PRINCIPAL)
+# PESTAÑA 2: NUEVO REGISTRO MÚLTIPLE (Optimizado Móvil/PC)
 # ---------------------------------------------------------
 with tab_registro:
-    st.title("📝 Registrar Nuevo Comprobante")
-    st.markdown("Ingresa los datos generales arriba, y luego añade tantos productos como necesites a la lista. Al final, guarda todo de un solo golpe.")
+    st.header("📝 Ingreso Rápido de Comprobante")
+    st.caption("Llena la Fecha y Serie arriba, luego añade todos los productos abajo.")
     
-    # DATOS GENERALES DEL COMPROBANTE (No se borran al añadir productos)
-    c_fecha, c_serie = st.columns(2)
-    fecha_ingreso = c_fecha.date_input("Fecha de la Boleta/Factura", date.today())
-    serie_ingreso = c_serie.text_input("N° Documento / Serie", placeholder="Ej: F001-00123")
+    with st.container():
+        c_fecha, c_serie = st.columns(2)
+        fecha_ingreso = c_fecha.date_input("🗓️ Fecha Boleta/Factura", date.today())
+        serie_ingreso = c_serie.text_input("🧾 N° Documento", placeholder="Ej: F001-00123")
     
-    st.markdown("### 🛒 Añadir Ítem al Comprobante")
+    st.markdown("---")
     
-    # Formulario para añadir 1 producto a la memoria temporal
+    # Formulario rediseñado en bloques de 2 (Perfecto para móvil)
     with st.form("form_item", clear_on_submit=True):
+        st.subheader("🛒 Datos del Producto")
         categoria = st.selectbox("Categoría / Rubro", CATEGORIAS)
         descripcion = st.text_input("Descripción del Producto*", placeholder="Ej: Sacos de Arroz")
         
-        c1, c2, c3, c4 = st.columns(4)
-        cantidad = c1.number_input("Cantidad", min_value=0.01, step=1.0, value=1.0)
-        unidad = c2.text_input("Unidad (Ej: UND, KG)", "UND")
-        precio_unitario = c3.number_input("P. Unitario", min_value=0.0, step=1.0, value=0.0)
-        monto_total = c4.number_input("Monto Total (Dejar en 0 para auto-calcular)", min_value=0.0, step=1.0, value=0.0)
+        # Bloque 1
+        colA, colB = st.columns(2)
+        cantidad = colA.number_input("Cantidad", min_value=0.01, step=1.0, value=1.0)
+        unidad = colB.text_input("Unidad", "UND")
         
-        btn_agregar = st.form_submit_button("➕ Añadir Producto a la Lista", type="secondary", use_container_width=True)
+        # Bloque 2
+        colC, colD = st.columns(2)
+        precio_unitario = colC.number_input("P. Unitario", min_value=0.0, step=1.0, value=0.0)
+        monto_total = colD.number_input("Total (Dejar 0 para Autocalcular)", min_value=0.0, step=1.0, value=0.0)
+        
+        st.write("") # Espaciador
+        btn_agregar = st.form_submit_button("➕ Añadir a la Lista Temporal", type="secondary", use_container_width=True)
         
         if btn_agregar:
             if descripcion.strip() != "":
-                # Mejora: Cálculo automático del total si el usuario lo dejó en 0
                 total_final = monto_total if monto_total > 0 else round((cantidad * precio_unitario), 2)
-                
                 st.session_state.lista_productos.append({
                     "Categoría": categoria,
                     "Descripción": descripcion.upper(),
@@ -308,16 +324,13 @@ with tab_registro:
                     "Precio Unitario": precio_unitario,
                     "Total": total_final
                 })
-                st.success(f"✔️ {descripcion.upper()} añadido a la lista temporal.")
+                st.success(f"✔️ {descripcion.upper()} añadido.")
             else:
-                st.error("⚠️ La descripción no puede estar vacía.")
+                st.error("⚠️ Falta la descripción.")
     
-    # MOSTRAR EL CARRITO DE COMPRAS TEMPORAL
+    # MOSTRAR CARRITO
     if len(st.session_state.lista_productos) > 0:
-        st.markdown("---")
-        st.subheader("📋 Lista de Productos a Guardar")
-        
-        # Convertimos la lista a un dataframe visual
+        st.markdown("### 📋 Resumen de la Boleta")
         df_lista = pd.DataFrame(st.session_state.lista_productos)
         
         st.dataframe(
@@ -325,18 +338,18 @@ with tab_registro:
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "Precio Unitario": st.column_config.NumberColumn("P. Unitario", format="S/ %.2f"),
+                "Precio Unitario": st.column_config.NumberColumn("P. Unit", format="S/ %.2f"),
                 "Total": st.column_config.NumberColumn("Total", format="S/ %.2f")
             }
         )
         
         suma_comprobante = df_lista["Total"].sum()
-        st.info(f"**💰 Suma Total del Comprobante: S/ {suma_comprobante:,.2f}**")
+        st.info(f"**💰 Total del Comprobante: S/ {suma_comprobante:,.2f}**")
         
-        col_guardar, col_limpiar = st.columns([3, 1])
+        # Botones de Acción
+        col_guardar, col_limpiar = st.columns([2, 1])
         
-        # Botón para GUARDAR TODO en Google Sheets
-        if col_guardar.button("💾 GUARDAR TODO EN LA NUBE", type="primary", use_container_width=True):
+        if col_guardar.button("💾 GUARDAR BOLETA EN LA NUBE", type="primary", use_container_width=True):
             ids_existentes = pd.to_numeric(df_gastos["ID"], errors='coerce').dropna()
             nuevo_id = int(ids_existentes.max() + 1) if not ids_existentes.empty else 1
             
@@ -353,77 +366,97 @@ with tab_registro:
                     "Precio Unitario": item["Precio Unitario"],
                     "Total": item["Total"]
                 })
-                nuevo_id += 1 # Aumentar ID para la siguiente fila
+                nuevo_id += 1 
             
             df_nuevos = pd.DataFrame(nuevos_registros)
             df_gastos = pd.concat([df_gastos, df_nuevos], ignore_index=True)
             df_gastos['Fecha'] = pd.to_datetime(df_gastos['Fecha'], errors='coerce').dt.date
             df_gastos = df_gastos.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
             
-            with st.spinner('Sincronizando con Google Sheets...'):
+            with st.spinner('Sincronizando...'):
                 exito = guardar_datos(df_gastos)
                 
             if exito:
-                st.session_state.lista_productos = [] # Limpiamos el carrito tras guardar
-                st.success(f"✅ ¡{len(df_nuevos)} registros guardados exitosamente!")
+                st.session_state.lista_productos = [] 
+                st.success(f"✅ Registros guardados.")
                 st.rerun()
-            else:
-                st.error("⚠️ Error de conexión al guardar. Inténtalo de nuevo.")
                 
-        # Botón para VACIAR LA LISTA si hubo un error
-        if col_limpiar.button("🗑️ Vaciar Lista", use_container_width=True):
+        if col_limpiar.button("🗑️ Cancelar", use_container_width=True):
             st.session_state.lista_productos = []
             st.rerun()
 
 
 # ---------------------------------------------------------
-# PESTAÑA 3: EDITOR Y DESCARGAS
+# PESTAÑA 3: EDITOR Y DESCARGAS (Anti-Lag)
 # ---------------------------------------------------------
 with tab_base_datos:
-    st.title("🗄️ Base de Datos Global")
-    st.info("💡 Haz tus correcciones o elimina filas directamente en la tabla y presiona **'💾 Guardar Cambios'**.")
-
+    st.header("🗄️ Base de Datos")
+    
     if not df_gastos.empty:
-        edited_df = st.data_editor(
-            df_gastos,
-            use_container_width=True,
-            num_rows="dynamic",
-            hide_index=False,
-            key="editor_datos_nube",
-            height=400,
+        # 1. Buscador Rápido (No congela la app)
+        st.subheader("🔍 Buscador Rápido")
+        busqueda = st.text_input("🔎 Escribe para buscar (Descripción, Categoría, Fecha...)", placeholder="Ej: Arroz, Combustible, 2025...")
+        
+        if busqueda:
+            # Filtrar dataframe como texto
+            df_vista = df_gastos[df_gastos.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
+        else:
+            df_vista = df_gastos
+            
+        st.dataframe(
+            df_vista, 
+            use_container_width=True, 
+            hide_index=True,
+            height=300,
             column_config={
-                "ID": st.column_config.NumberColumn("ID", disabled=True),
-                "Fecha": st.column_config.DateColumn("Fecha", format="YYYY-MM-DD", required=True),
-                "Categoría": st.column_config.SelectboxColumn("Categoría", options=CATEGORIAS, required=True),
-                "Precio Unitario": st.column_config.NumberColumn("P. Unitario", format="S/ %.2f"),
-                "Total": st.column_config.NumberColumn("Total", format="S/ %.2f", required=True)
+                "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                "Precio Unitario": st.column_config.NumberColumn("P. Unit", format="S/ %.2f"),
+                "Total": st.column_config.NumberColumn("Total", format="S/ %.2f")
             }
         )
+        
+        # 2. Modo Edición Oculto (Para evitar Lag en celulares con +1000 items)
+        with st.expander("✏️ Habilitar Edición Global (Precaución)"):
+            st.warning("⚠️ Edita directamente las celdas de la tabla inferior y presiona Guardar.")
+            edited_df = st.data_editor(
+                df_gastos,
+                use_container_width=True,
+                num_rows="dynamic",
+                hide_index=False,
+                key="editor_datos_nube",
+                height=400,
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", disabled=True),
+                    "Fecha": st.column_config.DateColumn("Fecha", format="YYYY-MM-DD", required=True),
+                    "Categoría": st.column_config.SelectboxColumn("Categoría", options=CATEGORIAS, required=True),
+                    "Precio Unitario": st.column_config.NumberColumn("P. Unitario", format="S/ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total", format="S/ %.2f", required=True)
+                }
+            )
 
-        col_edit1, col_edit2 = st.columns([1, 2])
-        if col_edit1.button("💾 Guardar Cambios en la Nube", type="primary"):
-            edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
-            edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
-            
-            with st.spinner('Guardando ediciones...'):
-                exito = guardar_datos(edited_df)
+            if st.button("💾 Confirmar y Guardar Ediciones", type="primary", use_container_width=True):
+                edited_df['Fecha'] = pd.to_datetime(edited_df['Fecha'], errors='coerce').dt.date
+                edited_df = edited_df.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
                 
-            if exito:
-                st.success("✅ Cambios sincronizados con Google Sheets exitosamente!")
-                st.rerun()
-            else:
-                st.error("⚠️ Error al guardar los cambios. Revisa tu conexión.")
+                with st.spinner('Sobreescribiendo Base de Datos...'):
+                    exito = guardar_datos(edited_df)
+                    
+                if exito:
+                    st.success("✅ ¡Modificaciones guardadas!")
+                    st.rerun()
 
         st.markdown("---")
-        st.subheader("📥 Exportar Reporte")
+        # 3. Descarga de Excel
+        st.subheader("📥 Exportar")
         excel_data = generar_excel_dinamico(df_gastos, input_periodo, input_pres, input_tes, input_fisc)
         
         st.download_button(
-            label="📊 Descargar Reporte Oficial en Excel 365",
+            label="📊 Descargar Excel Oficial",
             data=excel_data,
             file_name=f'Rendicion_{input_periodo.replace(" ", "_")}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            type="primary"
+            type="primary",
+            use_container_width=True
         )
     else:
         st.warning("No hay registros actualmente en Google Sheets.")
